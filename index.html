@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>単層パーセプトロン重み学習ステップビジュアライザー</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen">
+<div class="max-w-5xl mx-auto p-4 py-8">
+  <h1 class="text-3xl font-bold text-center mb-2 text-green-400">単層パーセプトロン 学習ビジュアライザー</h1>
+  <p class="text-center text-gray-400 text-sm mb-8">AND/OR/XOR問題でパーセプトロンの重み更新をステップ実行で可視化</p>
+
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+    <!-- 左：コントロールパネル -->
+    <div class="space-y-4">
+      <!-- 問題選択 -->
+      <div class="bg-gray-900 rounded-xl p-4 border border-gray-700">
+        <h2 class="font-bold text-sm text-gray-300 mb-3">問題選択</h2>
+        <div class="grid grid-cols-3 gap-2">
+          <button onclick="selectProblem('AND')" id="btn-AND" class="py-2 rounded-lg text-sm font-bold transition bg-green-700 text-white">AND</button>
+          <button onclick="selectProblem('OR')" id="btn-OR" class="py-2 rounded-lg text-sm font-bold transition bg-gray-700 text-gray-300">OR</button>
+          <button onclick="selectProblem('XOR')" id="btn-XOR" class="py-2 rounded-lg text-sm font-bold transition bg-gray-700 text-gray-300">XOR</button>
+        </div>
+        <div id="problemNote" class="mt-2 text-xs text-yellow-400 hidden">⚠ XORは線形分離不可能です。学習は収束しません。</div>
+      </div>
+
+      <!-- 重みパラメータ表示 -->
+      <div class="bg-gray-900 rounded-xl p-4 border border-gray-700">
+        <h2 class="font-bold text-sm text-gray-300 mb-3">現在の重み</h2>
+        <div class="space-y-2 text-sm font-mono">
+          <div class="flex justify-between items-center bg-gray-800 rounded p-2">
+            <span class="text-gray-400">w₁ (x₁の重み)</span>
+            <span id="w1-val" class="text-green-300 font-bold">0.00</span>
+          </div>
+          <div class="flex justify-between items-center bg-gray-800 rounded p-2">
+            <span class="text-gray-400">w₂ (x₂の重み)</span>
+            <span id="w2-val" class="text-green-300 font-bold">0.00</span>
+          </div>
+          <div class="flex justify-between items-center bg-gray-800 rounded p-2">
+            <span class="text-gray-400">b (バイアス)</span>
+            <span id="b-val" class="text-blue-300 font-bold">0.00</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 学習率 -->
+      <div class="bg-gray-900 rounded-xl p-4 border border-gray-700">
+        <div class="flex justify-between items-center mb-2">
+          <label class="font-bold text-sm text-gray-300">学習率 (η)</label>
+          <span id="lr-display" class="text-cyan-400 font-mono text-sm">0.1</span>
+        </div>
+        <input type="range" id="lrSlider" min="0.01" max="1.0" step="0.01" value="0.1" oninput="updateLR()" class="w-full accent-cyan-500">
+        <div class="flex justify-between text-xs text-gray-500 mt-1">
+          <span>0.01</span><span>1.0</span>
+        </div>
+      </div>
+
+      <!-- 学習統計 -->
+      <div class="bg-gray-900 rounded-xl p-4 border border-gray-700">
+        <h2 class="font-bold text-sm text-gray-300 mb-3">学習統計</h2>
+        <div class="space-y-2 text-sm">
+          <div class="flex justify-between">
+            <span class="text-gray-400">エポック数</span>
+            <span id="epoch-cnt" class="text-white font-bold">0</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-gray-400">正解数</span>
+            <span id="correct-cnt" class="text-white font-bold">0 / 4</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-gray-400">誤差（合計）</span>
+            <span id="error-cnt" class="text-red-400 font-bold">-</span>
+          </div>
+          <div id="convergedMsg" class="hidden text-green-400 text-xs font-bold bg-green-950 rounded p-2 text-center mt-2">✓ 収束しました！</div>
+          <div id="divergedMsg" class="hidden text-yellow-400 text-xs font-bold bg-yellow-950 rounded p-2 text-center mt-2">XOR: 線形分離不可能 → 収束しません</div>
+        </div>
+      </div>
+
+      <!-- ボタン -->
+      <div class="space-y-2">
+        <button onclick="stepEpoch()" id="stepBtn" class="w-full bg-green-700 hover:bg-green-600 text-white font-bold py-2.5 rounded-xl transition">1エポック 実行</button>
+        <button onclick="toggleAuto()" id="autoBtn" class="w-full bg-blue-700 hover:bg-blue-600 text-white font-bold py-2.5 rounded-xl transition">自動実行 ▶</button>
+        <button onclick="resetAll()" class="w-full bg-gray-700 hover:bg-gray-600 text-white font-bold py-2.5 rounded-xl transition">リセット</button>
+      </div>
+    </div>
+
+    <!-- 右：可視化エリア -->
+    <div class="lg:col-span-2 space-y-4">
+      <!-- Canvas -->
+      <div class="bg-gray-900 rounded-xl p-4 border border-gray-700">
+        <h2 class="font-bold text-sm text-gray-300 mb-3">2次元平面（決定境界）</h2>
+        <div class="flex justify-center">
+          <canvas id="mainCanvas" width="420" height="420" class="rounded-lg bg-gray-800 max-w-full"></canvas>
+        </div>
+        <div class="flex gap-4 mt-3 text-xs text-gray-400 justify-center">
+          <span><span class="inline-block w-3 h-3 rounded-full bg-blue-500 mr-1"></span>クラス0 (出力0)</span>
+          <span><span class="inline-block w-3 h-3 rounded-full bg-orange-400 mr-1"></span>クラス1 (出力1)</span>
+          <span><span class="inline-block w-3 h-3 rounded bg-purple-500 mr-1 opacity-60"></span>誤分類</span>
+        </div>
+      </div>
+
+      <!-- 真理値表 -->
+      <div class="bg-gray-900 rounded-xl p-4 border border-gray-700">
+        <h2 class="font-bold text-sm text-gray-300 mb-3">真理値表 / 分類結果</h2>
+        <div id="truthTable" class="text-sm"></div>
+      </div>
+
+      <!-- エポックログ -->
+      <div class="bg-gray-900 rounded-xl p-4 border border-gray-700">
+        <h2 class="font-bold text-sm text-gray-300 mb-2">エポックログ（最新10件）</h2>
+        <div id="epochLog" class="font-mono text-xs space-y-1 max-h-40 overflow-y-auto"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 解説 -->
+  <div class="mt-6 bg-gray-900 rounded-xl p-5 border border-gray-700">
+    <h2 class="font-bold text-yellow-400 mb-3">パーセプトロン学習則</h2>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-gray-300">
+      <div>
+        <p class="font-semibold text-white mb-1">更新式</p>
+        <p class="font-mono bg-gray-800 rounded p-2">w = w + η × (y - ŷ) × x</p>
+        <p class="font-mono bg-gray-800 rounded p-2 mt-1">b = b + η × (y - ŷ)</p>
+      </div>
+      <div>
+        <p class="font-semibold text-white mb-1">活性化関数</p>
+        <p class="font-mono bg-gray-800 rounded p-2">ŷ = 1 if (w₁x₁ + w₂x₂ + b ≥ 0) else 0</p>
+        <p class="mt-2 text-gray-400 text-xs">XORは線形境界では分離不可能。多層パーセプトロン（MLP）が必要。</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const PROBLEMS = {
+  AND: { data: [[0,0,0],[0,1,0],[1,0,0],[1,1,1]], color: 'green' },
+  OR:  { data: [[0,0,0],[0,1,1],[1,0,1],[1,1,1]], color: 'blue' },
+  XOR: { data: [[0,0,0],[0,1,1],[1,0,1],[1,1,0]], color: 'red' },
+};
+
+let w1 = 0, w2 = 0, b = 0;
+let lr = 0.1;
+let currentProblem = 'AND';
+let epoch = 0;
+let autoInterval = null;
+let converged = false;
+let epochLogs = [];
+
+function selectProblem(p) {
+  currentProblem = p;
+  ['AND','OR','XOR'].forEach(pp => {
+    const btn = document.getElementById('btn-'+pp);
+    btn.className = pp === p
+      ? 'py-2 rounded-lg text-sm font-bold transition bg-green-700 text-white'
+      : 'py-2 rounded-lg text-sm font-bold transition bg-gray-700 text-gray-300';
+  });
+  document.getElementById('problemNote').classList.toggle('hidden', p !== 'XOR');
+  resetAll();
+}
+
+function updateLR() {
+  lr = parseFloat(document.getElementById('lrSlider').value);
+  document.getElementById('lr-display').textContent = lr.toFixed(2);
+}
+
+function resetAll() {
+  w1 = 0; w2 = 0; b = 0; epoch = 0; converged = false; epochLogs = [];
+  if (autoInterval) { clearInterval(autoInterval); autoInterval = null; document.getElementById('autoBtn').textContent = '自動実行 ▶'; }
+  document.getElementById('convergedMsg').classList.add('hidden');
+  document.getElementById('divergedMsg').classList.add('hidden');
+  updateDisplay();
+}
+
+function predict(x1, x2) {
+  return (w1*x1 + w2*x2 + b >= 0) ? 1 : 0;
+}
+
+function stepEpoch() {
+  if (converged) return;
+  const data = PROBLEMS[currentProblem].data;
+  let totalError = 0;
+  let correct = 0;
+
+  for (const [x1, x2, y] of data) {
+    const yhat = predict(x1, x2);
+    const err = y - yhat;
+    totalError += Math.abs(err);
+    if (err !== 0) {
+      w1 += lr * err * x1;
+      w2 += lr * err * x2;
+      b  += lr * err;
+    } else {
+      correct++;
+    }
+  }
+  // recount after update
+  correct = data.filter(([x1,x2,y]) => predict(x1,x2) === y).length;
+
+  epoch++;
+  epochLogs.unshift(`Epoch ${String(epoch).padStart(3,'0')} | 正解:${correct}/4 | 誤差:${totalError} | w1=${w1.toFixed(3)} w2=${w2.toFixed(3)} b=${b.toFixed(3)}`);
+  if (epochLogs.length > 10) epochLogs.pop();
+
+  if (correct === 4 && currentProblem !== 'XOR') {
+    converged = true;
+    document.getElementById('convergedMsg').classList.remove('hidden');
+    if (autoInterval) { clearInterval(autoInterval); autoInterval = null; document.getElementById('autoBtn').textContent = '自動実行 ▶'; }
+  }
+  if (currentProblem === 'XOR' && epoch >= 100) {
+    document.getElementById('divergedMsg').classList.remove('hidden');
+    if (autoInterval) { clearInterval(autoInterval); autoInterval = null; document.getElementById('autoBtn').textContent = '自動実行 ▶'; }
+  }
+
+  updateDisplay();
+}
+
+function toggleAuto() {
+  if (autoInterval) {
+    clearInterval(autoInterval); autoInterval = null;
+    document.getElementById('autoBtn').textContent = '自動実行 ▶';
+  } else {
+    document.getElementById('autoBtn').textContent = '停止 ■';
+    autoInterval = setInterval(() => { stepEpoch(); if (converged || epoch >= 200) { clearInterval(autoInterval); autoInterval = null; document.getElementById('autoBtn').textContent = '自動実行 ▶'; } }, 150);
+  }
+}
+
+function updateDisplay() {
+  document.getElementById('w1-val').textContent = w1.toFixed(4);
+  document.getElementById('w2-val').textContent = w2.toFixed(4);
+  document.getElementById('b-val').textContent = b.toFixed(4);
+  document.getElementById('epoch-cnt').textContent = epoch;
+
+  const data = PROBLEMS[currentProblem].data;
+  const correct = data.filter(([x1,x2,y]) => predict(x1,x2) === y).length;
+  document.getElementById('correct-cnt').textContent = `${correct} / 4`;
+  const totalErr = data.reduce((s,[x1,x2,y]) => s + Math.abs(y - predict(x1,x2)), 0);
+  document.getElementById('error-cnt').textContent = totalErr;
+
+  // Truth table
+  const labels = ['(0,0)','(0,1)','(1,0)','(1,1)'];
+  const rows = data.map(([x1,x2,y], i) => {
+    const yhat = predict(x1,x2);
+    const ok = yhat === y;
+    return `<div class="flex gap-3 items-center ${ok ? '' : 'bg-red-950/50'} rounded px-2 py-1">
+      <span class="text-gray-400 w-12">${labels[i]}</span>
+      <span class="text-gray-400 w-16">正解: <strong class="text-white">${y}</strong></span>
+      <span class="w-16">予測: <strong class="${ok ? 'text-green-400' : 'text-red-400'}">${yhat}</strong></span>
+      <span>${ok ? '<span class="text-green-400">✓</span>' : '<span class="text-red-400">✗ 誤分類</span>'}</span>
+    </div>`;
+  });
+  document.getElementById('truthTable').innerHTML = rows.join('');
+
+  document.getElementById('epochLog').innerHTML = epochLogs.map(l => `<div class="text-gray-400">${l}</div>`).join('');
+
+  drawCanvas();
+}
+
+function drawCanvas() {
+  const canvas = document.getElementById('mainCanvas');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const pad = 60;
+  const scale = (W - pad*2);
+
+  ctx.clearRect(0,0,W,H);
+
+  // グリッド背景
+  ctx.fillStyle = '#1f2937';
+  ctx.fillRect(0,0,W,H);
+
+  // 決定境界の塗りつぶし
+  const imgData = ctx.createImageData(W, H);
+  for (let px = 0; px < W; px++) {
+    for (let py = 0; py < H; py++) {
+      const x1 = (px - pad) / scale;
+      const x2 = 1 - (py - pad) / scale;
+      const val = w1*x1 + w2*x2 + b;
+      const idx = (py*W + px)*4;
+      if (val >= 0) {
+        imgData.data[idx]=251; imgData.data[idx+1]=146; imgData.data[idx+2]=60; imgData.data[idx+3]=40;
+      } else {
+        imgData.data[idx]=59; imgData.data[idx+1]=130; imgData.data[idx+2]=246; imgData.data[idx+3]=40;
+      }
+    }
+  }
+  ctx.putImageData(imgData, 0, 0);
+
+  // 決定境界線 w1*x1 + w2*x2 + b = 0 → x2 = -(w1*x1 + b) / w2
+  if (Math.abs(w2) > 0.0001) {
+    ctx.strokeStyle = '#a78bfa';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6,4]);
+    ctx.beginPath();
+    const x1_start = -0.1, x1_end = 1.1;
+    const x2_start = -(w1*x1_start + b) / w2;
+    const x2_end = -(w1*x1_end + b) / w2;
+    const px_start = pad + x1_start * scale;
+    const py_start = pad + (1 - x2_start) * scale;
+    const px_end = pad + x1_end * scale;
+    const py_end = pad + (1 - x2_end) * scale;
+    ctx.moveTo(px_start, py_start);
+    ctx.lineTo(px_end, py_end);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // 軸
+  ctx.strokeStyle = '#4b5563';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(pad-15, H-pad); ctx.lineTo(W-pad+15, H-pad); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(pad, H-pad+15); ctx.lineTo(pad, pad-15); ctx.stroke();
+
+  // 軸ラベル
+  ctx.fillStyle = '#9ca3af'; ctx.font = '12px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText('x₁', W-pad+15, H-pad+5);
+  ctx.fillText('x₂', pad, pad-20);
+  ctx.fillText('0', pad-10, H-pad+15);
+  ctx.fillText('1', pad+scale, H-pad+15);
+  ctx.textAlign = 'right';
+  ctx.fillText('1', pad-5, pad);
+
+  // データ点
+  const data = PROBLEMS[currentProblem].data;
+  data.forEach(([x1,x2,y]) => {
+    const px = pad + x1 * scale;
+    const py = pad + (1-x2) * scale;
+    const yhat = predict(x1, x2);
+    const correct = yhat === y;
+
+    ctx.beginPath();
+    ctx.arc(px, py, 14, 0, Math.PI*2);
+    if (!correct) {
+      ctx.fillStyle = '#7c3aed';
+      ctx.fill();
+      ctx.strokeStyle = '#c4b5fd'; ctx.lineWidth = 2.5;
+      ctx.stroke();
+    } else if (y === 1) {
+      ctx.fillStyle = '#f97316'; ctx.fill();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+      ctx.stroke();
+    } else {
+      ctx.fillStyle = '#3b82f6'; ctx.fill();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText(y, px, py+4);
+  });
+}
+
+// 初期化
+resetAll();
+</script>
+</body>
+</html>
